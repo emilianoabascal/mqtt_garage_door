@@ -64,7 +64,7 @@ def on_message(client, userdata, msg):
         handle_command(msg.payload.decode())
 
 # Initialize MQTT Client
-client = mqtt.Client(MQTT_CLIENT_ID)
+client = mqtt.Client(MQTT_CLIENT_ID, protocol=mqtt.MQTTv311, callback_api_version=2)
 client.on_connect = on_connect
 client.on_message = on_message
 
