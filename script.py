@@ -19,6 +19,8 @@ GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # MQTT Setup
 MQTT_BROKER = os.getenv('MQTT_BROKER')  # Replace with your MQTT broker's IP address
+MQTT_USERNAME = os.getenv('MQTT_USERNAME')  # Replace with your MQTT broker's IP address
+MQTT_PASSWORD = os.getenv('MQTT_PASSWORD')  # Replace with your MQTT broker's IP address
 MQTT_CLIENT_ID = "garage_door"
 TOPIC_STATE = "garage/door/state"
 TOPIC_COMMAND = "garage/door/command"
@@ -53,7 +55,7 @@ def handle_command(command):
         GPIO.output(RELAY_PIN, GPIO.LOW)  # Deactivate relay
 
 # MQTT Callbacks
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties):
     print("Connected to MQTT Broker!")
     client.subscribe(TOPIC_COMMAND)
     client.publish(TOPIC_AVAILABILITY, "online", retain=True)
@@ -64,7 +66,8 @@ def on_message(client, userdata, msg):
         handle_command(msg.payload.decode())
 
 # Initialize MQTT Client
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, MQTT_CLIENT_ID)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, MQTT_CLIENT_ID)
+client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 client.on_connect = on_connect
 client.on_message = on_message
 
