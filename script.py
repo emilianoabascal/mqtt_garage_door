@@ -5,6 +5,8 @@ import json
 from dotenv import load_dotenv
 import os
 
+glob_state = "CLOSED"
+
 if not load_dotenv():
     print("error loading env variables")
     exit(1)
@@ -14,20 +16,21 @@ RELAY_PIN = 18  # GPIO pin for the relay
 REED_PIN = 17   # GPIO pin for the reed switch
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(RELAY_PIN, GPIO.OUT)
+GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
 GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+
 
 # MQTT Setup
 MQTT_BROKER = os.getenv('MQTT_BROKER')  # Replace with your MQTT broker's IP address
 MQTT_USERNAME = os.getenv('MQTT_USERNAME')  # Replace with your MQTT broker's IP address
 MQTT_PASSWORD = os.getenv('MQTT_PASSWORD')  # Replace with your MQTT broker's IP address
-MQTT_CLIENT_ID = "garage_door"
+MQTT_CLIENT_ID = "garage_door-pi"
 TOPIC_STATE = "garage/door/state"
 TOPIC_COMMAND = "garage/door/command"
 TOPIC_AVAILABILITY = "garage/availability"
 DISCOVERY_TOPIC = "homeassistant/cover/garage/config"
 
-# MQTT Discovery Payload
 DISCOVERY_PAYLOAD = {
     "name": "Garage Door",
     "command_topic": TOPIC_COMMAND,
@@ -36,9 +39,13 @@ DISCOVERY_PAYLOAD = {
     "payload_close": "CLOSE",
     "state_open": "OPEN",
     "state_closed": "CLOSED",
+    "availability_topic": TOPIC_AVAILABILITY,
+    "payload_available": "online",
+    "payload_not_available": "offline",
     "device_class": "garage",
-    "unique_id": "garage_door_opener",
-    "availability_topic": TOPIC_AVAILABILITY
+    "unique_id": MQTT_CLIENT_ID,
+    "optimistic": False,  # Optional: Disable optimistic mode (requires feedback)
+    "retain": True        # Optional: Retain last known state
 }
 
 # Helper Functions
@@ -49,17 +56,18 @@ def publish_state():
 
 def handle_command(command):
     """Handle open/close commands."""
+    print("hehehe", command)
     if command in ["OPEN", "CLOSE"]:
-        GPIO.output(RELAY_PIN, GPIO.HIGH)  # Activate relay
-        time.sleep(0.5)                   # Simulate button press
-        GPIO.output(RELAY_PIN, GPIO.LOW)  # Deactivate relay
+        GPIO.output(RELAY_PIN, GPIO.LOW)  # Activate relay
+        time.sleep(.5)                   # Simulate button press
+        GPIO.output(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc, properties):
     print("Connected to MQTT Broker!")
     client.subscribe(TOPIC_COMMAND)
     client.publish(TOPIC_AVAILABILITY, "online", retain=True)
-    client.publish(DISCOVERY_TOPIC, json.dumps(DISCOVERY_PAYLOAD), retain=True)
+    client.publish(DISCOVERY_TOPIC, json.dumps(DISCOVERY_PAYLOAD), qos=0, retain=True)
 
 def on_message(client, userdata, msg):
     if msg.topic == TOPIC_COMMAND:

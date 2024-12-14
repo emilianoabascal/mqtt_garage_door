@@ -1,0 +1,14 @@
+[Unit]
+Description=Garage Service with MQTT
+After=network.target
+
+[Service]
+ExecStart=/home/emilianoabascal/mqtt_garage_door/venv/python3 /home/emilianoabascal/mqtt_garage_door/script.py
+WorkingDirectory=/home/emilianoabascal
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=emilianoabascal
+
+[Install]
+WantedBy=multi-user.target
