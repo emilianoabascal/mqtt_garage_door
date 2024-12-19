@@ -8,7 +8,8 @@ import os
 last_activation_time = 0
 current_door_state = "UNKNOWN"
 COOLDOWN_PERIOD = 15  # Default value in seconds
-
+first_signal = False
+first_boot = True
 
 if not load_dotenv():
     print("error loading env variables")
@@ -19,7 +20,7 @@ RELAY_PIN = 18  # GPIO pin for the relay
 REED_PIN = 17   # GPIO pin for the reed switch
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
+
 GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # Cooldown Configuration Discovery
@@ -90,11 +91,19 @@ def publish_state(state=None):
 
 def handle_command(command):
     """Handle open/close commands with cooldown logic and intermediate states."""
-    global last_activation_time, current_door_state
+    
+    global last_activation_time, current_door_state, first_signal, first_boot
 
     # Cooldown logic
     current_time = time.time()
-
+    if first_boot:
+        first_boot = False
+        return
+    first_signal = True
+    if first_signal:
+        GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
+        first_signal = False
+        
     # Check if the cooldown has expired
     if current_time - last_activation_time >= COOLDOWN_PERIOD:
         if command == "OPEN" and current_door_state != "OPEN":
@@ -124,7 +133,7 @@ def handle_command(command):
             if GPIO.input(REED_PIN) == GPIO.LOW:
                 publish_state("CLOSED")  # Sensor confirmed closed
             else:
-                print("Door did not fully close after 15 seconds.")
+                print(f"Door did not fully close after {COOLDOWN_PERIOD} seconds.")
                 publish_state("CLOSING_FAILED")  # Optional failed state
 
         else:
