@@ -8,7 +8,7 @@ import os
 last_activation_time = 0
 current_door_state = "UNKNOWN"
 COOLDOWN_PERIOD = 15  # Default value in seconds
-first_signal = False
+first_command = False
 first_boot = True
 
 if not load_dotenv():
@@ -92,17 +92,17 @@ def publish_state(state=None):
 def handle_command(command):
     """Handle open/close commands with cooldown logic and intermediate states."""
     
-    global last_activation_time, current_door_state, first_signal, first_boot
+    global last_activation_time, current_door_state, first_command, first_boot
 
     # Cooldown logic
     current_time = time.time()
     if first_boot:
         first_boot = False
+        first_command = True
         return
-    first_signal = True
-    if first_signal:
+    if first_command:
         GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
-        first_signal = False
+        first_command = False
         
     # Check if the cooldown has expired
     if current_time - last_activation_time >= COOLDOWN_PERIOD:
