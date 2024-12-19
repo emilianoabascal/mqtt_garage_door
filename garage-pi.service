@@ -3,7 +3,7 @@ Description=Garage Service with MQTT
 After=network.target
 
 [Service]
-ExecStart=/home/emilianoabascal/mqtt_garage_door/venv/python3 /home/emilianoabascal/mqtt_garage_door/script.py
+ExecStart=/home/emilianoabascal/mqtt_garage_door/venv/bin/python3 /home/emilianoabascal/mqtt_garage_door/script.py
 WorkingDirectory=/home/emilianoabascal
 StandardOutput=inherit
 StandardError=inherit
