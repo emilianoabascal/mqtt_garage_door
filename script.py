@@ -2,6 +2,7 @@ import RPi.GPIO as GPIO
 import paho.mqtt.client as mqtt
 import time
 import json
+import asyncio
 from dotenv import load_dotenv
 import os
 
@@ -71,7 +72,7 @@ DISCOVERY_PAYLOAD = {
 }
 
 # Helper Functions
-def publish_state(state=None):
+async def publish_state(state=None):
     """Publish the state of the garage door."""
     global current_door_state
     if state:
@@ -82,14 +83,7 @@ def publish_state(state=None):
     client.publish(TOPIC_STATE, current_door_state, retain=True)
     print(f"State published: {current_door_state}")
 
-# def handle_command(command):
-#     """Handle open/close commands."""
-#     if command in ["OPEN", "CLOSE"]:
-#         GPIO.setup(RELAY_PIN, GPIO.LOW)  # Activate relay
-#         time.sleep(.5)                   # Simulate button press
-#         GPIO.setup(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
-
-def handle_command(command):
+async def handle_command(command):
     """Handle open/close commands with cooldown logic and intermediate states."""
     
     global last_activation_time, current_door_state, first_command, first_boot
@@ -108,19 +102,19 @@ def handle_command(command):
     if current_time - last_activation_time >= COOLDOWN_PERIOD:
         if command == "OPEN" and current_door_state != "OPEN":
             print("Command: OPEN")
-            publish_state("OPENING")  # Set intermediate state
+            await publish_state("OPENING")  # Set intermediate state
             GPIO.setup(RELAY_PIN, GPIO.LOW)  # Activate relay
             time.sleep(0.5)  # Simulate button press
             GPIO.setup(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
             last_activation_time = current_time
 
             # Wait 10 seconds for the door to open
-            time.sleep(COOLDOWN_PERIOD)
-            publish_state("OPEN")  # Set state to OPEN after timer
+            await asyncio.sleep(COOLDOWN_PERIOD)  # Simulate door opening
+            await publish_state("OPEN")
 
         elif command == "CLOSE" and current_door_state != "CLOSED":
             print("Command: CLOSE")
-            publish_state("CLOSING")  # Set intermediate state
+            await publish_state("CLOSING")  # Set intermediate state
             GPIO.setup(RELAY_PIN, GPIO.LOW)  # Activate relay
             time.sleep(0.5)  # Simulate button press
             GPIO.setup(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
@@ -129,12 +123,12 @@ def handle_command(command):
             # Wait 15 seconds or check sensor to confirm closed
             start_time = time.time()
             while GPIO.input(REED_PIN) == GPIO.HIGH and (time.time() - start_time) < COOLDOWN_PERIOD:
-                time.sleep(0.5)  # Check reed switch every 0.5 seconds
+                await asyncio.sleep(COOLDOWN_PERIOD)  # Check reed switch every 0.5 seconds
             if GPIO.input(REED_PIN) == GPIO.LOW:
-                publish_state("CLOSED")  # Sensor confirmed closed
+                await publish_state("CLOSED")  # Sensor confirmed closed
             else:
                 print(f"Door did not fully close after {COOLDOWN_PERIOD} seconds.")
-                publish_state("CLOSING_FAILED")  # Optional failed state
+                await publish_state("CLOSING_FAILED")  # Optional failed state
 
         else:
             print("Command ignored: Door already in the desired state.")
@@ -175,7 +169,8 @@ def on_message(client, userdata, msg):
         command = msg.payload.decode().strip().upper()  # Clean and ensure uppercase
         if command in ["OPEN", "CLOSE"]:
             print(f"Processing command: {command}")
-            handle_command(command)
+            # handle_command(command)
+            asyncio.run(handle_command(command))
         else:
             print(f"Invalid command received: {command}")
 
@@ -196,11 +191,12 @@ client.loop_start()
 
 # Main Loop
 try:
+    client.loop_start()
     last_state = None
     while True:
         current_state = GPIO.input(REED_PIN)
         if current_state != last_state:  # State changed
-            publish_state()
+            asyncio.run(publish_state())  # Initial state
             last_state = current_state
         time.sleep(0.1)
 except KeyboardInterrupt:
