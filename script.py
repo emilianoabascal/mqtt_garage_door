@@ -57,17 +57,18 @@ DISCOVERY_PAYLOAD = {
     "name": "Garage Door",
     "command_topic": TOPIC_COMMAND,
     "state_topic": TOPIC_STATE,
-    "payload_open": "OPEN",
-    "payload_close": "CLOSE",
-    "state_open": "OPEN",
-    "state_closed": "CLOSED",
+    "payload_open": "open",
+    "payload_close": "close",
+    "state_open": "open",
+    "state_closed": "closed",
     "availability_topic": TOPIC_AVAILABILITY,
     "payload_available": "online",
     "payload_not_available": "offline",
     "device_class": "garage",
     "unique_id": MQTT_CLIENT_ID,
     "optimistic": False,  # Optional: Disable optimistic mode (requires feedback)
-    "retain": True        # Optional: Retain last known state
+    "retain": True,        # Optional: Retain last known state
+    "supported_features": 0  # Exclude the "Stop" button
     
 }
 
@@ -100,9 +101,9 @@ async def handle_command(command):
         
     # Check if the cooldown has expired
     if current_time - last_activation_time >= COOLDOWN_PERIOD:
-        if command == "OPEN" and current_door_state != "OPEN":
-            print("Command: OPEN")
-            await publish_state("OPENING")  # Set intermediate state
+        if command == "open" and current_door_state != "open":
+            print("Command: open")
+            await publish_state("opening")  # Set intermediate state
             GPIO.setup(RELAY_PIN, GPIO.LOW)  # Activate relay
             time.sleep(0.5)  # Simulate button press
             GPIO.setup(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
@@ -110,11 +111,11 @@ async def handle_command(command):
 
             # Wait 10 seconds for the door to open
             await asyncio.sleep(COOLDOWN_PERIOD)  # Simulate door opening
-            await publish_state("OPEN")
+            await publish_state("open")
 
-        elif command == "CLOSE" and current_door_state != "CLOSED":
-            print("Command: CLOSE")
-            await publish_state("CLOSING")  # Set intermediate state
+        elif command == "close" and current_door_state != "closed":
+            print("Command: close")
+            await publish_state("closing")  # Set intermediate state
             GPIO.setup(RELAY_PIN, GPIO.LOW)  # Activate relay
             time.sleep(0.5)  # Simulate button press
             GPIO.setup(RELAY_PIN, GPIO.HIGH)  # Deactivate relay
@@ -125,10 +126,10 @@ async def handle_command(command):
             while GPIO.input(REED_PIN) == GPIO.HIGH and (time.time() - start_time) < COOLDOWN_PERIOD:
                 await asyncio.sleep(COOLDOWN_PERIOD)  # Check reed switch every 0.5 seconds
             if GPIO.input(REED_PIN) == GPIO.LOW:
-                await publish_state("CLOSED")  # Sensor confirmed closed
+                await publish_state("closed")  # Sensor confirmed closed
             else:
                 print(f"Door did not fully close after {COOLDOWN_PERIOD} seconds.")
-                await publish_state("CLOSING_FAILED")  # Optional failed state
+                await publish_state("closing_failed")  # Optional failed state
 
         else:
             print("Command ignored: Door already in the desired state.")
@@ -166,8 +167,8 @@ def on_message(client, userdata, msg):
 
     # Handle Command Topic (OPEN/CLOSE)
     elif msg.topic == TOPIC_COMMAND:
-        command = msg.payload.decode().strip().upper()  # Clean and ensure uppercase
-        if command in ["OPEN", "CLOSE"]:
+        command = msg.payload.decode().strip().lower()  # Clean and ensure uppercase
+        if command in ["open", "close"]:
             print(f"Processing command: {command}")
             # handle_command(command)
             asyncio.run(handle_command(command))
