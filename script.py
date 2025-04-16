@@ -140,33 +140,18 @@ async def handle_command(command):
         if command == "open" and current_door_state != "open":
             await publish_state("opening")
             # Activate relay via re-setup (keep as-is)
-            # GPIO.setup(RELAY_PIN, GPIO.OUT, GPIO.LOW)
             GPIO.output(RELAY_PIN, GPIO.LOW)  
-            state = GPIO.input(RELAY_PIN)
-            print("Relay state is:", state)
             await asyncio.sleep(0.5)
             GPIO.output(RELAY_PIN, GPIO.HIGH)
-            # GPIO.setup(RELAY_PIN, GPIO.OUT, GPIO.HIGH)
-            state = GPIO.input(RELAY_PIN)
-            print("Relay state is:", state)
-            print("-----")
             last_activation_time = current_time
             await asyncio.sleep(COOLDOWN_PERIOD)
             await publish_state("open")
 
         elif command == "close" and current_door_state != "closed":
             await publish_state("closing")
-            # GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
-            # GPIO.output(RELAY_PIN, GPIO.LOW)
             GPIO.output(RELAY_PIN, GPIO.LOW)  
-            state = GPIO.input(RELAY_PIN)
-            print("Relay state is:", state)
             await asyncio.sleep(0.5)
-            # GPIO.setup(RELAY_PIN, GPIO.OUT, GPIO.HIGH)
             GPIO.output(RELAY_PIN, GPIO.HIGH)
-            state = GPIO.input(RELAY_PIN)
-            print("Relay state is:", state)
-            print("-----")
             last_activation_time = current_time
             start_time = time.time()
             # Wait up to COOLDOWN_PERIOD seconds for the door to close
