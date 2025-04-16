@@ -40,6 +40,7 @@ last_activation_time = 0
 current_door_state = "UNKNOWN"
 COOLDOWN_PERIOD = 15  # seconds
 first_command = True
+in_motion = False
 first_boot = True
 loop = None  # Will set the asyncio event loop later
 
@@ -49,11 +50,11 @@ if not load_dotenv():
     exit(1)
 
 # GPIO Setup
-RELAY_PIN = 27
-REED_PIN = 17
 
+RELAY_PIN = int(os.getenv('RELAY_PIN'))
+REED_PIN = int(os.getenv('REED_PIN'))
+GPIO.cleanup()
 GPIO.setmode(GPIO.BCM)
-
 GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
 # MQTT Setup
@@ -105,70 +106,99 @@ COOLDOWN_DISCOVERY_PAYLOAD = {
 # -------------------------------
 # Async Functions and MQTT Callbacks
 # -------------------------------
-async def publish_state(state=None):
-    global current_door_state
-    if state:
-        current_door_state = state
-    else:
-        # Directly read the sensor for real-time state
-        state = GPIO.input(REED_PIN)
-        print(state)
-        current_door_state = "open" if GPIO.input(REED_PIN) == GPIO.LOW else "closed"
-    client.publish(TOPIC_STATE, current_door_state, retain=True)
-    logger.info(f"State published: {current_door_state}")
+async def publish_state(transitional_state: str = None):
+    global current_door_state, in_motion
+
+    if transitional_state:
+        current_door_state = transitional_state
+        # always publish opening/closing—even if in_motion is already True
+        client.publish(TOPIC_STATE, current_door_state, retain=True)
+        logger.info(f"State published: {current_door_state}")
+        return
+
+    # sensor‑driven state
+    raw = GPIO.input(REED_PIN)
+    final = "open" if raw == GPIO.HIGH else "closed"
+
+    # only publish if we’re not in the middle of a command transition
+    if not in_motion:
+        current_door_state = final
+        client.publish(TOPIC_STATE, current_door_state, retain=True)
+        logger.info(f"State published: {current_door_state} (reed={raw})")
 
 
 async def handle_command(command):
-    global last_activation_time, current_door_state, first_command, first_boot
+    global last_activation_time, current_door_state, first_command, first_boot, in_motion
 
     current_time = time.time()
-
-    # if first_boot:
-    #     first_boot = False
-    #     first_command = True
-    #     logger.debug("First boot detected. Skipping command processing.")
-    #     return
     logger.info(f"Command: {command}")
-    # if first_command:
-    #     # Relay initialization - leaving this as-is per your request
-    #     GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.HIGH)
-    #     first_command = False
-    #     logger.debug("First command initialization complete.")
     state = GPIO.input(RELAY_PIN)
-    print("Relay state is:", state)
-    if current_time - last_activation_time >= COOLDOWN_PERIOD:
+    if current_time - last_activation_time >= COOLDOWN_PERIOD and not in_motion:
         if command == "open" and current_door_state != "open":
-            await publish_state("opening")
-            # Activate relay via re-setup (keep as-is)
-            GPIO.output(RELAY_PIN, GPIO.LOW)  
-            await asyncio.sleep(0.5)
-            GPIO.output(RELAY_PIN, GPIO.HIGH)
-            last_activation_time = current_time
-            await asyncio.sleep(COOLDOWN_PERIOD)
-            await publish_state("open")
+            asyncio.create_task(handle_open())
 
         elif command == "close" and current_door_state != "closed":
-            await publish_state("closing")
-            GPIO.output(RELAY_PIN, GPIO.LOW)  
-            await asyncio.sleep(0.5)
-            GPIO.output(RELAY_PIN, GPIO.HIGH)
-            last_activation_time = current_time
-            start_time = time.time()
-            # Wait up to COOLDOWN_PERIOD seconds for the door to close
-            while GPIO.input(REED_PIN) == GPIO.LOW and (time.time() - start_time) < COOLDOWN_PERIOD:
-                await asyncio.sleep(0.5)
+            asyncio.create_task(handle_close())
 
-            if GPIO.input(REED_PIN) == GPIO.HIGH:
-                await publish_state("closed")
-            else:
-                logger.error("Door did not fully close.")
-                await publish_state("closing_failed")
         else:
             logger.info("Command ignored: Door already in desired state.")
     else:
         remaining = int(COOLDOWN_PERIOD - (current_time - last_activation_time))
         logger.info(f"Ignored command '{command}': cooldown active ({remaining}s remaining).")
 
+async def handle_open():
+    global last_activation_time, in_motion
+
+
+    now = time.time()
+    # enforce cooldown
+    if now - last_activation_time < COOLDOWN_PERIOD:
+        remaining = int(COOLDOWN_PERIOD - (now - last_activation_time))
+        logger.info(f"Ignoring open: {remaining}s cooldown remaining.")
+        return
+
+    last_activation_time = now
+    await publish_state("opening")
+    in_motion = True
+    # pulse the relay
+    GPIO.output(RELAY_PIN, GPIO.LOW)
+    await asyncio.sleep(0.5)
+    GPIO.output(RELAY_PIN, GPIO.HIGH)
+
+    # wait the full cooldown as your “open” timer
+    await asyncio.sleep(COOLDOWN_PERIOD)
+
+    await publish_state("open")
+    in_motion = False
+
+async def handle_close():
+    global last_activation_time, in_motion
+    now = time.time()
+    # enforce cooldown
+    if now - last_activation_time < COOLDOWN_PERIOD:
+        remaining = int(COOLDOWN_PERIOD - (now - last_activation_time))
+        logger.info(f"Ignoring open: {remaining}s cooldown remaining.")
+        return
+    in_motion = True
+    await publish_state("closing")
+    GPIO.output(RELAY_PIN, GPIO.LOW)
+    await asyncio.sleep(0.5)
+    GPIO.output(RELAY_PIN, GPIO.HIGH)
+    # wait the full cooldown as your “open” timer
+    await asyncio.sleep(COOLDOWN_PERIOD)
+    in_motion = False
+    # done—let monitor_reed() send "closed"
+
+async def wait_for_reed_open():
+    # poll every 0.1s until reed reads HIGH
+    while GPIO.input(REED_PIN) == GPIO.LOW:
+        await asyncio.sleep(0.1)
+
+async def wait_for_reed_closed():
+    # As long as the reed pin is HIGH (door still open),
+    # yield control back to the event loop briefly.
+    while GPIO.input(REED_PIN) == GPIO.HIGH:
+        await asyncio.sleep(0.1)
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc, properties):
@@ -181,6 +211,7 @@ def on_connect(client, userdata, flags, rc, properties):
     publish_cover_discovery()
     # Schedule publish_state() in the already running event loop
     asyncio.run_coroutine_threadsafe(publish_state(), loop)
+
 
 
 def on_message(client, userdata, msg):
@@ -220,7 +251,7 @@ def publish_cover_discovery():
 
 def publish_cooldown_discovery():
     client.publish(COOLDOWN_DISCOVERY_TOPIC, json.dumps(COOLDOWN_DISCOVERY_PAYLOAD), retain=True)
-    logger.info("Published MQTT Discovery for Cooldown Slider.")
+    
 
 
 # -------------------------------
@@ -232,8 +263,6 @@ client.on_connect = on_connect
 client.on_message = on_message
 
 client.will_set(TOPIC_AVAILABILITY, "offline", retain=True)
-client.connect(MQTT_BROKER, 1883, 60)
-client.loop_start()
 
 
 # -------------------------------
@@ -243,10 +272,12 @@ async def monitor_reed():
     last_state = None
     while True:
         current_state = GPIO.input(REED_PIN)
+        # logger.info(f"REED VALUE: {current_state}")
         if current_state != last_state:
+            logger.info(f"REED VALUE: {current_state}")
             await publish_state()
             last_state = current_state
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
 
 
 # -------------------------------
@@ -259,6 +290,8 @@ if __name__ == "__main__":
         asyncio.set_event_loop(loop)
 
         # Schedule the reed switch monitoring task
+        client.connect(MQTT_BROKER, 1883, 60)
+        client.loop_start()
         loop.create_task(monitor_reed())
 
         # Run the asyncio event loop forever
