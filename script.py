@@ -121,7 +121,7 @@ async def publish_state(transitional_state: str = None):
     final = "open" if raw == GPIO.HIGH else "closed"
 
     # only publish if we’re not in the middle of a command transition
-    if not in_motion:
+    if not in_motion or final == "closed":
         current_door_state = final
         client.publish(TOPIC_STATE, current_door_state, retain=True)
         logger.info(f"State published: {current_door_state} (reed={raw})")
