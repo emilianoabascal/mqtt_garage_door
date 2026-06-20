@@ -160,6 +160,19 @@ COOLDOWN_DISCOVERY_PAYLOAD = {
 # ---------------------------------------------------------------------------
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
+
+# Configure the relay pin's internal pull to its IDLE level BEFORE driving it
+# as an output. This is critical: on the BCM283x the pull-up/down setting is
+# *sticky* — it persists across warm reboots. By pinning the pull to idle we
+# hold the relay line at its safe level during the boot window (after a reboot,
+# before this service starts), so the door is NOT triggered on reboot.
+#
+# Without this, GPIO17 falls back to its power-on default pull (DOWN = LOW),
+# which is the *active* level for an active-low relay — energising it for the
+# whole boot and pulsing the opener. (The previous working version relied on
+# exactly this PUD_UP line; the rewrite had dropped it.)
+RELAY_IDLE_PULL = GPIO.PUD_UP if RELAY_IDLE == GPIO.HIGH else GPIO.PUD_DOWN
+GPIO.setup(RELAY_PIN, GPIO.IN, pull_up_down=RELAY_IDLE_PULL)
 GPIO.setup(RELAY_PIN, GPIO.OUT, initial=RELAY_IDLE)
 GPIO.setup(REED_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
