@@ -4,10 +4,11 @@ After=network.target
 
 [Service]
 ExecStart=/home/emilianoabascal/mqtt_garage_door/venv/bin/python3 /home/emilianoabascal/mqtt_garage_door/script.py
-WorkingDirectory=/home/emilianoabascal
+WorkingDirectory=/home/emilianoabascal/mqtt_garage_door
 StandardOutput=inherit
 StandardError=inherit
 Restart=always
+RestartSec=5
 User=emilianoabascal
 
 [Install]
