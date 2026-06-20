@@ -380,9 +380,15 @@ def main() -> None:
         client.loop_stop()
         client.disconnect()
         loop.close()
+        # Keep the relay pin DRIVEN at its idle level across shutdown.
+        # We intentionally do NOT GPIO.cleanup() the relay: cleanup() reverts
+        # it to a floating input, and during a service restart that float is
+        # read by the relay board as a button press, triggering the door on
+        # every restart. Holding the output level keeps the relay idle while
+        # the next process starts up.
         GPIO.output(RELAY_PIN, RELAY_IDLE)
-        GPIO.cleanup()
-        logger.info("Cleaned up GPIO and disconnected from MQTT.")
+        GPIO.cleanup(REED_PIN)
+        logger.info("Disconnected from MQTT; relay held idle (not cleaned up).")
 
 
 if __name__ == "__main__":
