@@ -85,9 +85,14 @@ COOLDOWN_PERIOD = int(os.getenv("COOLDOWN_PERIOD", "15"))
 COOLDOWN_MIN = 5
 COOLDOWN_MAX = 60
 
-# How long the door physically takes to travel; used as a timeout while we
-# wait for the reed switch to confirm the new position.
-DOOR_TRAVEL_TIME = float(os.getenv("DOOR_TRAVEL_TIME", "20"))
+# Opening can't be confirmed by the single (closed-only) reed switch, so we
+# just show "opening" for this fixed duration, then report "open".
+OPEN_TRAVEL_TIME = float(os.getenv("OPEN_TRAVEL_TIME", "15"))
+
+# Closing is confirmed by the reed switch; this is the max time we wait for
+# that confirmation before flagging the move as failed. Keep it above the
+# real close travel time (observed ~17s) plus margin.
+CLOSE_TIMEOUT = float(os.getenv("CLOSE_TIMEOUT", "30"))
 
 # MQTT
 MQTT_BROKER = _required("MQTT_BROKER")
@@ -206,11 +211,11 @@ async def _pulse_relay() -> None:
 
 
 async def _wait_until_reed_closed() -> bool:
-    """Poll until the reed reports closed, or until DOOR_TRAVEL_TIME elapses.
+    """Poll until the reed reports closed, or until CLOSE_TIMEOUT elapses.
 
     Returns True if the door reached the closed position, False on timeout.
     """
-    deadline = asyncio.get_event_loop().time() + DOOR_TRAVEL_TIME
+    deadline = asyncio.get_event_loop().time() + CLOSE_TIMEOUT
     while not reed_is_closed():
         if asyncio.get_event_loop().time() >= deadline:
             logger.warning("Timed out waiting for the door to close.")
@@ -248,7 +253,7 @@ async def handle_command(command: str) -> None:
             # it never moved).
             _publish_state("opening")
             await _pulse_relay()
-            await asyncio.sleep(DOOR_TRAVEL_TIME)
+            await asyncio.sleep(OPEN_TRAVEL_TIME)
             if reed_is_closed():
                 logger.warning("Door still reads closed after 'open'; it may not have moved.")
                 _publish_state("closed")

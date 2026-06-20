@@ -38,7 +38,8 @@ integrated with Home Assistant over MQTT (auto-discovery).
 | `RELAY_ACTIVE_LOW` | `true` for active-LOW relay boards, `false` for active-HIGH | `true`  |
 | `PULSE_SECONDS`    | Relay hold time to emulate a button press                 | `0.5`   |
 | `COOLDOWN_PERIOD`  | Min seconds between accepted commands (5–60)              | `15`    |
-| `DOOR_TRAVEL_TIME` | Seconds to wait for the reed switch to confirm a move     | `20`    |
+| `OPEN_TRAVEL_TIME` | Seconds shown as "opening" before reporting "open"        | `15`    |
+| `CLOSE_TIMEOUT`    | Max seconds to wait for the reed to confirm "closed"      | `30`    |
 | `MQTT_BROKER`      | Broker hostname/IP                                        | —       |
 | `MQTT_PORT`        | Broker port                                               | `1883`  |
 | `MQTT_USERNAME`    | Broker username (optional)                                | —       |
