@@ -39,9 +39,7 @@ logger.addHandler(console_handler)
 last_activation_time = 0
 current_door_state = "UNKNOWN"
 COOLDOWN_PERIOD = 15  # seconds
-first_command = True
 in_motion = False
-first_boot = True
 loop = None  # Will set the asyncio event loop later
 
 # Load environment variables
@@ -83,8 +81,7 @@ DISCOVERY_PAYLOAD = {
     "device_class": "garage",
     "unique_id": MQTT_CLIENT_ID,
     "optimistic": False,
-    "retain": True,
-    "supported_features": 0
+    "retain": False
 }
 
 COOLDOWN_DISCOVERY_TOPIC = "homeassistant/number/garage_door_cooldown/config"
@@ -129,23 +126,24 @@ async def publish_state(transitional_state: str = None):
 
 
 async def handle_command(command):
-    global last_activation_time, current_door_state, first_command, first_boot, in_motion
-
     current_time = time.time()
     logger.info(f"Command: {command}")
-    state = GPIO.input(RELAY_PIN)
-    if current_time - last_activation_time >= COOLDOWN_PERIOD and not in_motion:
-        if command == "open" and current_door_state != "open":
-            asyncio.create_task(handle_open())
 
-        elif command == "close" and current_door_state != "closed":
-            asyncio.create_task(handle_close())
+    if in_motion:
+        logger.info(f"Ignored command '{command}': door is in motion.")
+        return
 
-        else:
-            logger.info("Command ignored: Door already in desired state.")
-    else:
+    if current_time - last_activation_time < COOLDOWN_PERIOD:
         remaining = int(COOLDOWN_PERIOD - (current_time - last_activation_time))
         logger.info(f"Ignored command '{command}': cooldown active ({remaining}s remaining).")
+        return
+
+    if command == "open" and current_door_state != "open":
+        asyncio.create_task(handle_open())
+    elif command == "close" and current_door_state != "closed":
+        asyncio.create_task(handle_close())
+    else:
+        logger.info("Command ignored: Door already in desired state.")
 
 async def handle_open():
     global last_activation_time, in_motion
@@ -159,8 +157,8 @@ async def handle_open():
         return
 
     last_activation_time = now
-    await publish_state("opening")
     in_motion = True
+    await publish_state("opening")
     # pulse the relay
     GPIO.output(RELAY_PIN, GPIO.LOW)
     await asyncio.sleep(0.5)
@@ -169,8 +167,9 @@ async def handle_open():
     # wait the full cooldown as your “open” timer
     await asyncio.sleep(COOLDOWN_PERIOD)
 
-    await publish_state("open")
     in_motion = False
+    # report whatever the reed switch actually says (door may not have moved)
+    await publish_state()
 
 async def handle_close():
     global last_activation_time, in_motion
@@ -178,8 +177,9 @@ async def handle_close():
     # enforce cooldown
     if now - last_activation_time < COOLDOWN_PERIOD:
         remaining = int(COOLDOWN_PERIOD - (now - last_activation_time))
-        logger.info(f"Ignoring open: {remaining}s cooldown remaining.")
+        logger.info(f"Ignoring close: {remaining}s cooldown remaining.")
         return
+    last_activation_time = now
     in_motion = True
     await publish_state("closing")
     GPIO.output(RELAY_PIN, GPIO.LOW)
@@ -188,18 +188,8 @@ async def handle_close():
     # wait the full cooldown as your “open” timer
     await asyncio.sleep(COOLDOWN_PERIOD)
     in_motion = False
-    # done—let monitor_reed() send "closed"
-
-async def wait_for_reed_open():
-    # poll every 0.1s until reed reads HIGH
-    while GPIO.input(REED_PIN) == GPIO.LOW:
-        await asyncio.sleep(0.1)
-
-async def wait_for_reed_closed():
-    # As long as the reed pin is HIGH (door still open),
-    # yield control back to the event loop briefly.
-    while GPIO.input(REED_PIN) == GPIO.HIGH:
-        await asyncio.sleep(0.1)
+    # report whatever the reed switch actually says (door may not have closed)
+    await publish_state()
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc, properties):
@@ -218,6 +208,17 @@ def on_connect(client, userdata, flags, rc, properties):
 def on_message(client, userdata, msg):
     global COOLDOWN_PERIOD
 
+    if msg.topic == COOLDOWN_STATE_TOPIC:
+        # retained value on this topic restores the cooldown after a restart
+        try:
+            new_cooldown = int(float(msg.payload.decode()))
+            if 5 <= new_cooldown <= 60 and new_cooldown != COOLDOWN_PERIOD:
+                COOLDOWN_PERIOD = new_cooldown
+                logger.info(f"Cooldown restored to {COOLDOWN_PERIOD} seconds.")
+        except ValueError:
+            logger.warning("Invalid cooldown state payload.")
+        return
+
     if msg.retain:
         logger.info(f"Ignored retained message on topic '{msg.topic}'")
         return
@@ -226,7 +227,8 @@ def on_message(client, userdata, msg):
 
     if msg.topic == COOLDOWN_COMMAND_TOPIC:
         try:
-            new_cooldown = int(msg.payload.decode())
+            # Home Assistant number entities send floats (e.g. "20.0")
+            new_cooldown = int(float(msg.payload.decode()))
             if 5 <= new_cooldown <= 60:
                 COOLDOWN_PERIOD = new_cooldown
                 logger.info(f"Cooldown updated to {COOLDOWN_PERIOD} seconds.")
@@ -301,6 +303,8 @@ if __name__ == "__main__":
         logger.info("Shutting down due to keyboard interrupt...")
     finally:
         GPIO.cleanup()
+        # LWT only fires on unexpected disconnects, so announce offline explicitly
+        client.publish(TOPIC_AVAILABILITY, "offline", retain=True)
         client.loop_stop()
         client.disconnect()
         loop.stop()
